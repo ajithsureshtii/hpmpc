@@ -4,10 +4,20 @@
 #include <gemm.cuh>
 #include <cstdint>
 #include <iostream>
+#include <cuda_runtime.h>
+
+// process_offset and CHEETAH_NUM_GPUS are compiled in via config.h / MACRO_FLAGS.
+// Each forked child calls cudaSetDevice once per GEMM to route to its assigned GPU.
+extern int process_offset;
+
+#ifndef CHEETAH_NUM_GPUS
+#define CHEETAH_NUM_GPUS 1
+#endif
 
 template <typename Type>
 void gemm_cutlass(int M, int N, int K, Type* X, Type* W, Type* Y)
 {
+    cudaSetDevice(process_offset % CHEETAH_NUM_GPUS);
     Type *x, *w, *y;
     cudaMalloc((void**)&x, M * K * sizeof(Type));  // Matrix X has M rows and K columns
     cudaMalloc((void**)&w, K * N * sizeof(Type));  // Matrix W has K rows and N columns
@@ -29,11 +39,11 @@ void gemm_cutlass(int M, int N, int K, Type* X, Type* W, Type* Y)
 // forward declare the function for different integer Testtypes
 //  UINT8 and UINT16 are not supported by all architectures
 // template void gemm_cutlass<uint8_t>(int M, int N, int K, uint8_t *X, uint8_t *W, uint8_t *Y);
-template void gemm_cutlass<uint16_t>(int M,
-                                     int N,
-                                     int K,
-                                     uint16_t* X,
-                                     uint16_t* W,
-                                     uint16_t* Y);  // INT8 and INT16 are not supported by some architectures
+// template void gemm_cutlass<uint16_t>(int M,
+//                                      int N,
+//                                      int K,
+//                                      uint16_t* X,
+//                                      uint16_t* W,
+//                                      uint16_t* Y);  // INT8 and INT16 are not supported by some architectures
 template void gemm_cutlass<uint32_t>(int M, int N, int K, uint32_t* X, uint32_t* W, uint32_t* Y);
 template void gemm_cutlass<uint64_t>(int M, int N, int K, uint64_t* X, uint64_t* W, uint64_t* Y);
