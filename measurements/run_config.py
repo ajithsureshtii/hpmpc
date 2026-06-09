@@ -34,16 +34,14 @@ def print_progress_bar(iteration, total, prefix='', suffix='', length=50, fill='
         print()
 
 def run_command(command, log):
-    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-    if stdout:
-        output = stdout.decode()
-        print(output)
+    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    for line in iter(process.stdout.readline, b''):
+        output = line.decode()
+        print(output, end='', flush=True)
         log.write(output)
-    if stderr:
-        output = stderr.decode()
-        print(output)
-        log.write(output)
+        log.flush()
+    process.stdout.close()
+    process.wait()
 
 def main():
     parser = argparse.ArgumentParser(description='Run configurations')
@@ -69,7 +67,7 @@ def main():
 
     config_files = []
     if os.path.isdir(args.config):
-        config_files = [os.path.join(args.config, f) for f in os.listdir(args.config) if f.endswith('.conf')]
+        config_files = sorted([os.path.join(args.config, f) for f in os.listdir(args.config) if f.endswith('.conf')])
     else:
         config_files = [args.config]
 
@@ -132,6 +130,16 @@ def main():
 
                     print(f"==== Saved log file {run_count}/{total_runs} to {log_file} ====")
                     print(f"==== Saved config details to {config_log_file} ====")
+
+                    # Kill leftover processes so ports are free for the next run.
+                    # Exclude this script's own PID to avoid killing ourselves.
+                    my_pid = os.getpid()
+                    cleanup_command = (
+                        f"pkill -9 -f run.sh; pkill -9 -f run-P; "
+                        f"pgrep -f python | grep -v {my_pid} | xargs -r kill -9; "
+                        f"sleep 1; clear"
+                    )
+                    subprocess.run(cleanup_command, shell=True)
 
 if __name__ == '__main__':
     main()
