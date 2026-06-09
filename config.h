@@ -71,6 +71,13 @@
 #define USE_CUDA_GEMM 0
 #endif
 
+// Number of GPUs per party for multi-process runs (PROCESS_NUM > 1).
+// Each forked process uses gpu_id = process_offset % CHEETAH_NUM_GPUS.
+// Default 1 keeps all processes on GPU 0 (backward-compatible).
+#ifndef CHEETAH_NUM_GPUS
+#define CHEETAH_NUM_GPUS 1
+#endif
+
 // === Tweaks ===
 
 // How many gates should be buffered until sending them to the receiving party? 0 means the data of an entire
