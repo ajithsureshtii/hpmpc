@@ -730,6 +730,9 @@ void generateLayerDummyTriples(type** a,
     Iface::Keys<IO::NetIO>::instance(CHEETAH_PARTY, ip, port, CHEETAH_THREADS, PROCESS_NUM).disconnect();
     auto& keys = Iface::Keys<IO::NetIO>::instance(CHEETAH_PARTY, ip, port, CHEETAH_THREADS, PROCESS_NUM);
     const int factor = DATTYPE/BITLENGTH;
+    // Assign each forked process to a GPU round-robin across CHEETAH_NUM_GPUS.
+    // process_offset is the 0-based index of this child (set in main.cpp before fork).
+    const int cheetah_gpu_id = process_offset % CHEETAH_NUM_GPUS;
 
     if(factor == 1) { // No need to unvectorize
 #if CHEETAH_CONV_TYPE == 1
@@ -769,7 +772,7 @@ void generateLayerDummyTriples(type** a,
                         conv,
                         CHEETAH_PARTY, CHEETAH_THREADS,
                         A_KNOWN == 0 ? Utils::PROTO::AB : Utils::PROTO::AB2,
-                        factor, A_KNOWN == 0
+                        factor, A_KNOWN == 0, cheetah_gpu_id
                 );
 #else
                 parms[n] = conv;
@@ -783,7 +786,7 @@ void generateLayerDummyTriples(type** a,
                         p.batchSize, p.in_feat, p.out_feat,
                         CHEETAH_PARTY, CHEETAH_THREADS,
                         A_KNOWN == 0 ? Utils::PROTO::AB : Utils::PROTO::AB2,
-                        factor
+                        factor, cheetah_gpu_id
                 );
             } else if constexpr (std::is_same_v<LayerParams, BatchNorm2DParameter>) {
                 Iface::generateBNTriplesCheetah(keys,
@@ -879,7 +882,7 @@ void generateLayerDummyTriples(type** a,
                         conv,
                         CHEETAH_PARTY, CHEETAH_THREADS,
                         A_KNOWN == 1 ? Utils::PROTO::AB2 : Utils::PROTO::AB,
-                        factor
+                        factor, false, cheetah_gpu_id
                 );
             } else if constexpr (std::is_same_v<LayerParams, FullyConnectedParameter>) {
                 Iface::generateFCTriplesCheetah(keys,
@@ -887,7 +890,7 @@ void generateLayerDummyTriples(type** a,
                         p.batchSize, p.in_feat, p.out_feat,
                         CHEETAH_PARTY, CHEETAH_THREADS,
                         A_KNOWN == 1 ? Utils::PROTO::AB2 : Utils::PROTO::AB,
-                        factor
+                        factor, cheetah_gpu_id
                 );
             } else if constexpr (std::is_same_v<LayerParams, BatchNorm2DParameter>) {
                 Iface::generateBNTriplesCheetah(keys,
