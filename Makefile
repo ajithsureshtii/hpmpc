@@ -21,6 +21,13 @@ CHEETAH_STAMP         := $(CURDIR)/$(CHEETAH)/.build_stamp
 CHEETAH_STAMP_CONTENT := gpu=$(CHEETAH_GPU) arch=$(CHEETAH_GPU_ARCH) reverse=$(CHEETAH_GPU_REVERSE) fc_gpu=$(CHEETAH_FC_GPU)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── CUTLASS arch stamp ────────────────────────────────────────────────────────
+# CUTLASS objects must be compiled for the LOCAL GPU arch (sm_XX).
+# If the arch changed or the objects are missing, rebuild them.
+CUTLASS_STAMP         := $(CURDIR)/core/cuda/.cutlass_stamp
+CUTLASS_STAMP_CONTENT := arch=sm_$(CHEETAH_GPU_ARCH)
+# ─────────────────────────────────────────────────────────────────────────────
+
 HE_INCLUDE := -I${CHEETAH}/src/include \
 			  -I${CHEETAH}/src \
 			  -isystem ${CHEETAH}/deps/include \
@@ -90,7 +97,7 @@ CONFIG_OPTIONS := PROTOCOL PRE PARTY BITLENGTH FRACTIONAL FUNCTION_IDENTIFIER NU
 
 
 # Targets
-.PHONY: all clean compile_pch compile_parties link_objects convtriple_check
+.PHONY: all clean compile_pch compile_parties link_objects convtriple_check cutlass_check
 
 all: compile_pch compile_executables link_objects
 
@@ -118,7 +125,26 @@ convtriple_check:
 	fi
 # ─────────────────────────────────────────────────────────────────────────────
 
-compile_pch: convtriple_check
+# ── CUTLASS auto-rebuild when GPU arch changes ────────────────────────────────
+cutlass_check:
+	@if [ "$(USE_CUDA_GEMM)" -gt 0 ]; then \
+		CURRENT=$$(cat $(CUTLASS_STAMP) 2>/dev/null); \
+		WANTED="$(CUTLASS_STAMP_CONTENT)"; \
+		if [ "$$CURRENT" != "$$WANTED" ] || \
+		   [ ! -f $(CURDIR)/core/cuda/bin/gemm_cutlass_int.o ]; then \
+			echo "[CUTLASS] Rebuilding for arch=sm_$(CHEETAH_GPU_ARCH) (CUDA_PATH=$(CUDA_PATH), CUTLASS_PATH=$(CUTLASS_PATH))..."; \
+			$(MAKE) -C $(CURDIR)/core/cuda \
+				arch=sm_$(CHEETAH_GPU_ARCH) \
+				CUDA_PATH=$(CUDA_PATH) \
+				CUTLASS_PATH=$(CUTLASS_PATH) \
+				all \
+			  && echo "$$WANTED" > $(CUTLASS_STAMP) \
+			  || { echo "[CUTLASS] Build FAILED — check output above"; exit 1; }; \
+		fi; \
+	fi
+# ─────────────────────────────────────────────────────────────────────────────
+
+compile_pch: convtriple_check cutlass_check
 	@if [ ! -f $(PCH_OBJ) ] || [ $(PCH) -nt $(PCH_OBJ) ]; then \
 		echo "Compiling precompiled header..."; \
 		$(COMPILER) $(EXECFLAGS) -x c++-header $(PCH) -o $(PCH_OBJ); \

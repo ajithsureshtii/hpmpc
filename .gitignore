@@ -31,3 +31,7 @@ machines.json
 #preprocessing
 *.pre*
 data/
+
+# CUTLASS objects are arch-specific — rebuilt locally by make
+core/cuda/bin/
+core/cuda/.cutlass_stamp

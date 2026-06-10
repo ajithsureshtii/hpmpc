@@ -1,7 +1,7 @@
 # User-specified options
 arch ?= sm_89
-CUDA_PATH ?= /home/usr/local/cuda
-CUTLASS_PATH ?= /home/ubuntu/cutlass
+CUDA_PATH ?= /usr/local/cuda
+CUTLASS_PATH ?= /cutlass
 #replace with e.g. make arch=sm_52 CUDA_PATH=/opt/cuda CUTLASS_PATH=/home/christopher/workspace/cutlass
 
 # Derived variables
