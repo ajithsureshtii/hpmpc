@@ -13,9 +13,11 @@
 # availability, gcc-11/g++-11, RANDOM_ALGORITHM=0/USE_SSL=0 dev-friendly
 # build flags via build_secure_agg.sh.
 #
-# Build (from the hpmpc/ directory, with flotilla/ as a sibling):
+# Build (from this directory, mpc_engines/hpmpc/ nested inside flotilla/ --
+# see flotilla's docs/secure_aggregation/design.md's "Vendored MPC
+# libraries" note):
 #   docker build -f measurements/Dockerfile.bench --build-context hpmpc_src=. \
-#     --build-context flotilla_src=../flotilla -t flotilla-fedavg-bench .
+#     --build-context flotilla_src=../.. -t flotilla-fedavg-bench .
 # Run:
 #   docker run --rm flotilla-fedavg-bench
 

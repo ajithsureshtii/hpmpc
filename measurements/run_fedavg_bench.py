@@ -49,6 +49,13 @@ from unittest.mock import patch
 import numpy as np
 
 HPMPC_ROOT = Path(__file__).resolve().parents[1]
+# Inside the Dockerfile.bench image, hpmpc and flotilla are copied to their
+# own top-level directories (/hpmpc, /flotilla) -- siblings in the
+# container's filesystem regardless of hpmpc's host-side location (a git
+# submodule nested under flotilla/mpc_engines/hpmpc -- see flotilla's
+# docs/secure_aggregation/design.md's "Vendored MPC libraries" note). Only
+# the Dockerfile's own --build-context invocation path changed for that;
+# this in-container path did not.
 FLOTILLA_SRC = HPMPC_ROOT.parent / "flotilla" / "src"
 sys.path.insert(0, str(FLOTILLA_SRC))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
