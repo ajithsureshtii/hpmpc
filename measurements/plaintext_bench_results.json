@@ -1,0 +1,14 @@
+{
+  "param_count": 61706,
+  "num_clients": 3,
+  "iterations": 1000,
+  "wall_time_s": {
+    "mean": 0.0004593360226717778,
+    "median": 0.0004510415019467473,
+    "p95": 0.0005520000122487545,
+    "min": 0.0003299999516457319,
+    "max": 0.0029457919881679118
+  },
+  "client_to_server_wire_bytes": 249925,
+  "party_to_party_wire_bytes": "n/a -- fedavg has no party-to-party communication tier at all"
+}

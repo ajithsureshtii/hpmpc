@@ -378,8 +378,17 @@ void compare_views()
             }
             if (!verified)
             {
+                // Flotilla patch (see flotilla/docs/secure_aggregation/
+                // hpmpc_backend.md's Tetrad section): a detected malicious
+                // deviation must produce a real failure signal. The
+                // original `/* exit(0); */` here was dead code -- even
+                // when uncommented it would have reported SUCCESS (exit
+                // code 0) on a detected cheat. Flotilla's HpmpcBackend
+                // treats any nonzero process exit code as a failed round
+                // (see backend_hpmpc.py's run_aggregation_round); exit(1)
+                // is what makes that check actually catch this case.
                 printf("P%i: Compareviews failed! \n", PARTY);
-                /* exit(0); */
+                exit(1);
             }
             /* else */
             /* printf("Compareviews of Player %i sucessfull! \n", */

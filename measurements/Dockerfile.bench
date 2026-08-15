@@ -1,0 +1,46 @@
+# Builds all 3 hpmpc protocols Flotilla's secure_mpc uses (replicated,
+# trio, tetrad) plus a Python environment for run_fedavg_bench.py, so the
+# micro-benchmark (docs/secure_aggregation/overhead_report.md) can run all
+# of a given protocol's party processes on loopback WITHIN this one
+# container -- isolating protocol overhead from cross-container Docker-
+# network jitter, which the separate real end-to-end runs (Phase E) still
+# measure at a coarser level. Not part of the deployable system -- this is
+# a measurement tool only, kept next to run_fedavg_bench.py rather than
+# under docker/.
+#
+# Same base distro/toolchain choices as docker/Dockerfile.secure_agg_party.hpmpc
+# (see that file's comments for why) -- ubuntu:22.04 for Python 3.10 wheel
+# availability, gcc-11/g++-11, RANDOM_ALGORITHM=0/USE_SSL=0 dev-friendly
+# build flags via build_secure_agg.sh.
+#
+# Build (from the hpmpc/ directory, with flotilla/ as a sibling):
+#   docker build -f measurements/Dockerfile.bench --build-context hpmpc_src=. \
+#     --build-context flotilla_src=../flotilla -t flotilla-fedavg-bench .
+# Run:
+#   docker run --rm flotilla-fedavg-bench
+
+FROM ubuntu:22.04
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        gcc-11 g++-11 libeigen3-dev libssl-dev git ca-certificates build-essential make \
+        python3 python3-pip && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11 && \
+    update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 100 && \
+    update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++ 100 && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /hpmpc
+COPY --from=hpmpc_src . /hpmpc
+RUN bash scripts/build_secure_agg.sh replicated 64 13 && \
+    bash scripts/build_secure_agg.sh trio 64 13 && \
+    bash scripts/build_secure_agg.sh tetrad 64 13
+
+RUN pip3 install numpy==1.24.3 && \
+    pip3 install torch --index-url https://download.pytorch.org/whl/cpu
+
+WORKDIR /flotilla
+COPY --from=flotilla_src . /flotilla
+
+WORKDIR /hpmpc
+CMD ["python3", "measurements/run_fedavg_bench.py"]
