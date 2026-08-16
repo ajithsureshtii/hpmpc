@@ -40,6 +40,8 @@
 #include "programs/tutorials/YourFirstProgram.hpp"
 #elif FUNCTION_IDENTIFIER == 90
 #include "programs/functions/fedavg_secure_aggregation.hpp"
+#elif FUNCTION_IDENTIFIER == 91
+#include "programs/functions/mult_fedavg_secure_aggregation.hpp"
 #elif FUNCTION_IDENTIFIER < 400
 #include "programs/NN.hpp"
 #elif FUNCTION_IDENTIFIER >= 500 && FUNCTION_IDENTIFIER <= 534

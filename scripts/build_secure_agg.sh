@@ -7,7 +7,14 @@
 # these compiled executables fails loudly at start() instead of silently
 # corrupting a round.
 #
-# Usage: scripts/build_secure_agg.sh <replicated|trio|tetrad> [bitlength] [frac_bits]
+# Usage: scripts/build_secure_agg.sh <replicated|trio|tetrad|trio_mult> [bitlength] [frac_bits]
+#
+# "trio_mult" builds mult_fedavg_secure_aggregation.hpp (FUNCTION_IDENTIFIER=91
+# -- the "mpc_product" weighting-mode variant, see
+# docs/secure_aggregation/mult_fedavg.md) instead of the default
+# fedavg_secure_aggregation.hpp (FUNCTION_IDENTIFIER=90); every other
+# protocol name here builds the default program. Currently Trio (PROTOCOL=5)
+# only -- see mult_fedavg_secure_aggregation.hpp's module docstring.
 #
 # Builds into executables/<protocol_name>/, NOT executables/ directly --
 # the Makefile's compiled output filenames (run-P{i}.o) are NOT
@@ -38,16 +45,17 @@
 
 set -euo pipefail
 
-PROTOCOL_NAME="${1:?usage: build_secure_agg.sh <replicated|trio|tetrad> [bitlength] [frac_bits]}"
+PROTOCOL_NAME="${1:?usage: build_secure_agg.sh <replicated|trio|tetrad|trio_mult> [bitlength] [frac_bits]}"
 BITLENGTH="${2:-64}"
 FRAC_BITS="${3:-13}"
 
 case "$PROTOCOL_NAME" in
-    replicated) PROTOCOL_NUM=2; PARTIES="0 1 2" ;;
-    trio)       PROTOCOL_NUM=5; PARTIES="0 1 2" ;;
-    tetrad)     PROTOCOL_NUM=8; PARTIES="0 1 2 3" ;;
+    replicated) PROTOCOL_NUM=2; PARTIES="0 1 2"; FUNCTION_IDENTIFIER=90; METADATA_NAME=fedavg_secure_aggregation ;;
+    trio)       PROTOCOL_NUM=5; PARTIES="0 1 2"; FUNCTION_IDENTIFIER=90; METADATA_NAME=fedavg_secure_aggregation ;;
+    tetrad)     PROTOCOL_NUM=8; PARTIES="0 1 2 3"; FUNCTION_IDENTIFIER=90; METADATA_NAME=fedavg_secure_aggregation ;;
+    trio_mult)  PROTOCOL_NUM=5; PARTIES="0 1 2"; FUNCTION_IDENTIFIER=91; METADATA_NAME=mult_fedavg_secure_aggregation ;;
     *)
-        echo "unknown protocol: $PROTOCOL_NAME (expected replicated|trio|tetrad)" >&2
+        echo "unknown protocol: $PROTOCOL_NAME (expected replicated|trio|tetrad|trio_mult)" >&2
         exit 1
         ;;
 esac
@@ -57,21 +65,21 @@ OUT_DIR="executables/$PROTOCOL_NAME"
 mkdir -p "$OUT_DIR"
 
 for PARTY in $PARTIES; do
-    echo "Building $PROTOCOL_NAME party $PARTY (bitlength=$BITLENGTH, frac_bits=$FRAC_BITS)..."
-    make PARTY="$PARTY" PROTOCOL="$PROTOCOL_NUM" FUNCTION_IDENTIFIER=90 \
+    echo "Building $PROTOCOL_NAME party $PARTY (bitlength=$BITLENGTH, frac_bits=$FRAC_BITS, function_identifier=$FUNCTION_IDENTIFIER)..."
+    make PARTY="$PARTY" PROTOCOL="$PROTOCOL_NUM" FUNCTION_IDENTIFIER="$FUNCTION_IDENTIFIER" \
         BITLENGTH="$BITLENGTH" FRACTIONAL="$FRAC_BITS" DATTYPE=64 \
         RANDOM_ALGORITHM=0 USE_SSL=0
     mv "executables/run-P${PARTY}.o" "$OUT_DIR/run-P${PARTY}.o"
 done
 
-cat > "$OUT_DIR/fedavg_secure_aggregation.build_metadata.json" <<EOF
+cat > "$OUT_DIR/${METADATA_NAME}.build_metadata.json" <<EOF
 {
   "bitlength": $BITLENGTH,
   "frac_bits": $FRAC_BITS,
   "protocol": $PROTOCOL_NUM,
-  "function_identifier": 90
+  "function_identifier": $FUNCTION_IDENTIFIER
 }
 EOF
 
 echo "Built $OUT_DIR/run-P{$(echo "$PARTIES" | tr ' ' ',')}.o"
-echo "Wrote $OUT_DIR/fedavg_secure_aggregation.build_metadata.json"
+echo "Wrote $OUT_DIR/${METADATA_NAME}.build_metadata.json"
