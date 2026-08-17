@@ -1,11 +1,28 @@
 #pragma once
 
 // FedAvg secure aggregation for Flotilla (see
-// flotilla/docs/secure_aggregation/hpmpc_backend.md). Reveals the plaintext
-// sum of N clients' already-secret-shared, pre-weighted (by their own
-// dataset size) updates -- never an individual client's update. Division
-// by the round's total weight happens in plaintext, outside this program,
-// in aggregator_secure_mpc.py.
+// flotilla/docs/secure_aggregation/hpmpc_backend.md). Computes the sum of N
+// clients' already-secret-shared, pre-weighted (by their own dataset size)
+// updates -- but, unlike an earlier version of this program, does NOT
+// reveal that sum among the compute parties. Instead each party exports
+// its OWN raw share of the sum, and reconstruction happens entirely at
+// flo_server (see server/secure_agg/reconstruct.py and
+// aggregator_secure_mpc.py) -- so no compute party, individually or
+// collectively, ever learns the plaintext aggregate. See
+// docs/secure_aggregation/threat_model.md for the resulting trust-model
+// consequence (flo_server becomes the one place plaintext is ever
+// computed, unlike the old symmetric-reveal design). Division by the
+// round's total weight also happens in plaintext at flo_server, after
+// reconstruction, exactly as it did after reveal before.
+//
+// Since Python already pre-sums every client's share before this program
+// ever runs (see "why summing happens in Python" below), and reveal is now
+// gone, this program does ZERO inter-party communication for the
+// client_side weighting mode -- it is a pure local read-transform-write.
+// It is still built and invoked as a compiled hpmpc program, for
+// consistency with mult_fedavg_secure_aggregation.hpp (which DOES still
+// need real communication for its multiply step) and in case a future
+// variant needs this program to do real MPC work again.
 //
 // Supports PROTOCOL=2 (Replicated 3PC), PROTOCOL=5 (Trio), and PROTOCOL=8
 // (Tetrad) behind the SAME template -- one compiled binary per (protocol,
@@ -70,23 +87,29 @@
 //                3 roles; 3 for Tetrad's 4 roles) -- the PRE-SUMMED share
 //                of the weighted total, one row per flattened model-weight
 //                element.
-//   output file: uint32 elements_per_client, then that many uint64 values
-//                (the revealed raw ring representation of the sum -- decode
-//                via FixedPointCodec on the Python side). Identical across
-//                every protocol/role -- reveal always produces one uint64.
+//   output file: uint32 elements_per_client, then that many rows of the
+//                SAME N uint64 fields each, in the SAME order -- this
+//                party's own raw share of the (still-secret) sum, in
+//                exactly the on-disk shape hpmpc's own Share constructor
+//                expects, so backend_hpmpc.py can pass it straight to
+//                server/secure_agg/reconstruct.py without any
+//                protocol-specific unpacking of its own. Output format is
+//                identical to the input format precisely because no
+//                computation happened here beyond what Python already did
+//                (plain local addition preserves a share's field shape).
 //
 // This function is instantiated TWICE per protocol by protocol_executer.hpp:
 // once during the init phase with a lightweight stub type used only to size
 // communication buffers (Replicated_init / OECL{0,1,2}_init / etc. -- see
 // PROTOCOL_INIT in Protocols.h), and once during the live phase with the
 // real share type (Replicated_Share / OECL{0,1,2}_Share / etc). The
-// init-phase stub types have no raw-field constructor, so the real
-// share-construction logic is guarded with `if constexpr` per concrete live
-// Share type -- discarded entirely, not just skipped, for the init-phase
-// instantiation. Both phases still run the SAME number of
-// prepare_reveal_to_all/communicate/complete_reveal_to_all calls (one per
-// element), which is what keeps the init phase's buffer-size bookkeeping
-// consistent with what the live phase actually sends.
+// init-phase stub types have no raw-field constructor and no raw_*()
+// accessors, so the real share-construction/export logic is guarded with
+// `if constexpr` per concrete live Share type -- discarded entirely, not
+// just skipped, for the init-phase instantiation. Both phases run the SAME
+// (zero) number of communication-bearing calls, so there is no
+// init/live buffer-bookkeeping symmetry concern here anymore -- that
+// concern only existed because of the reveal round this version removes.
 
 #include "../../datatypes/Additive_Share.hpp"
 #include <cstdint>
@@ -174,12 +197,23 @@ void FedAvgSecureAggregation(DATATYPE* res)
             Share raw_share(static_cast<DATATYPE>(x_val), static_cast<DATATYPE>(a_val));
             values[k] = A(raw_share);
         }
+
+        // No reveal -- export this party's own raw (still-secret) share of
+        // the sum directly. See module docstring: reconstruction now
+        // happens at flo_server, never among the compute parties.
+        std::ofstream out(output_path, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(&elements_per_client), sizeof(elements_per_client));
+        for (uint32_t k = 0; k < elements_per_client; k++)
+        {
+            uint64_t x_out = static_cast<uint64_t>(values[k].get_share().raw_x());
+            uint64_t a_out = static_cast<uint64_t>(values[k].get_share().raw_a());
+            out.write(reinterpret_cast<const char*>(&x_out), sizeof(x_out));
+            out.write(reinterpret_cast<const char*>(&a_out), sizeof(a_out));
+        }
     }
 #elif PROTOCOL == 5
     // Trio. All 3 roles share the SAME 2-uint64-per-element on-disk layout
-    // (p1, p2) -- role 1/2's `p2` is unused by reveal (see
-    // hpmpc_backend.md's Trio section) but kept in the file format for a
-    // uniform, role-independent input-file writer on the Python side.
+    // (p1, p2).
     if constexpr (std::is_same_v<Share, TRIO_LIVE_SHARE>)
     {
         std::ifstream in(input_path, std::ios::binary);
@@ -195,6 +229,17 @@ void FedAvgSecureAggregation(DATATYPE* res)
             Share raw_share(static_cast<DATATYPE>(p1_val), static_cast<DATATYPE>(p2_val));
             values[k] = A(raw_share);
         }
+
+        // No reveal -- see PROTOCOL==2's branch above for why.
+        std::ofstream out(output_path, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(&elements_per_client), sizeof(elements_per_client));
+        for (uint32_t k = 0; k < elements_per_client; k++)
+        {
+            uint64_t p1_out = static_cast<uint64_t>(values[k].get_share().raw_p1());
+            uint64_t p2_out = static_cast<uint64_t>(values[k].get_share().raw_p2());
+            out.write(reinterpret_cast<const char*>(&p1_out), sizeof(p1_out));
+            out.write(reinterpret_cast<const char*>(&p2_out), sizeof(p2_out));
+        }
     }
 #elif PROTOCOL == 8
     // Tetrad. All 4 roles share the SAME 3-uint64-per-element on-disk layout
@@ -202,7 +247,9 @@ void FedAvgSecureAggregation(DATATYPE* res)
     // lambda1, lambda2, lambda3 for P3, see hpmpc_backend.md's Tetrad
     // section) but the field count/order needs no per-role branching here,
     // since each role's constructor already expects fields in this exact
-    // order (see the TETRAD_LIVE_SHARE comment above).
+    // order (see the TETRAD_LIVE_SHARE comment above). raw_mv/raw_l0/raw_l1
+    // (P0/1/2) and raw_l1/raw_l2/raw_l3 (P3) are each named to match their
+    // OWN role's semantics, but occupy the SAME f0/f1/f2 output slots.
     if constexpr (std::is_same_v<Share, TETRAD_LIVE_SHARE>)
     {
         std::ifstream in(input_path, std::ios::binary);
@@ -220,35 +267,27 @@ void FedAvgSecureAggregation(DATATYPE* res)
             Share raw_share(static_cast<DATATYPE>(f0_val), static_cast<DATATYPE>(f1_val), static_cast<DATATYPE>(f2_val));
             values[k] = A(raw_share);
         }
-    }
-#endif
 
-    for (uint32_t k = 0; k < elements_per_client; k++)
-        values[k].prepare_reveal_to_all();
-    Share::communicate();
-
-#if PROTOCOL == 2
-    if constexpr (std::is_same_v<Share, Replicated_Share<DATATYPE>>)
-#elif PROTOCOL == 5
-    if constexpr (std::is_same_v<Share, TRIO_LIVE_SHARE>)
-#elif PROTOCOL == 8
-    if constexpr (std::is_same_v<Share, TETRAD_LIVE_SHARE>)
-#endif
-    {
-        std::vector<uint64_t> output(elements_per_client);
-        for (uint32_t k = 0; k < elements_per_client; k++)
-            output[k] = static_cast<uint64_t>(values[k].complete_reveal_to_all());
-
+        // No reveal -- see PROTOCOL==2's branch above for why.
         std::ofstream out(output_path, std::ios::binary);
         out.write(reinterpret_cast<const char*>(&elements_per_client), sizeof(elements_per_client));
-        out.write(reinterpret_cast<const char*>(output.data()),
-                  static_cast<std::streamsize>(elements_per_client) * sizeof(uint64_t));
-    }
-    else
-    {
         for (uint32_t k = 0; k < elements_per_client; k++)
-            values[k].complete_reveal_to_all();  // consume the matching receive; init-phase result is unused
+        {
+#if PARTY == 3
+            uint64_t f0_out = static_cast<uint64_t>(values[k].get_share().raw_l1());
+            uint64_t f1_out = static_cast<uint64_t>(values[k].get_share().raw_l2());
+            uint64_t f2_out = static_cast<uint64_t>(values[k].get_share().raw_l3());
+#else
+            uint64_t f0_out = static_cast<uint64_t>(values[k].get_share().raw_mv());
+            uint64_t f1_out = static_cast<uint64_t>(values[k].get_share().raw_l0());
+            uint64_t f2_out = static_cast<uint64_t>(values[k].get_share().raw_l1());
+#endif
+            out.write(reinterpret_cast<const char*>(&f0_out), sizeof(f0_out));
+            out.write(reinterpret_cast<const char*>(&f1_out), sizeof(f1_out));
+            out.write(reinterpret_cast<const char*>(&f2_out), sizeof(f2_out));
+        }
     }
+#endif
 
     *res = 0;
 }

@@ -18,6 +18,12 @@ class Tetrad1_Share
         l1 = c;
     }
 
+    // Flotilla addition -- see OECL0_Share's raw_p1()/raw_p2() docstring
+    // (protocols/3-PC/ours/oecl-P_0_template.hpp) for why this exists.
+    Datatype raw_mv() const { return mv; }
+    Datatype raw_l0() const { return l0; }
+    Datatype raw_l1() const { return l1; }
+
     Tetrad1_Share public_val(Datatype a) { return Tetrad1_Share(a, SET_ALL_ZERO(), SET_ALL_ZERO()); }
 
     Tetrad1_Share Not() const { return Tetrad1_Share(NOT(mv), l0, l1); }

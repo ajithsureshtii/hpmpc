@@ -3,16 +3,24 @@
 // "mult_fedavg" secure aggregation variant for Flotilla (see
 // flotilla/docs/secure_aggregation/hpmpc_backend.md and
 // docs/secure_aggregation/mult_fedavg.md). Unlike fedavg_secure_aggregation.hpp
-// (which reveals a plaintext sum of ALREADY-PRE-WEIGHTED client updates,
-// summed in Python before this program ever runs), this variant receives
-// each client's RAW (unweighted) update and RAW dataset size separately,
-// computes weight_i * dataset_size_i via genuine secret x secret
-// multiplication INSIDE the MPC circuit for every client, sums those
-// products across clients, and reveals only the sum -- so the servers
-// genuinely have to communicate to compute the product, not just to reveal
-// a sum. This is why the file format and control flow differ so much from
-// fedavg_secure_aggregation.hpp's "read one pre-summed row per element"
-// design; see that file's docstring for the contrasting, simpler case.
+// (which just sums ALREADY-PRE-WEIGHTED client updates, summed in Python
+// before this program ever runs), this variant receives each client's RAW
+// (unweighted) update and RAW dataset size separately, and computes
+// weight_i * dataset_size_i via genuine secret x secret multiplication
+// INSIDE the MPC circuit for every client, then sums those products across
+// clients -- so the servers genuinely have to communicate to compute the
+// product, not just to combine shares. This is why the file format and
+// control flow differ so much from fedavg_secure_aggregation.hpp's "read
+// one pre-summed row per element" design; see that file's docstring for
+// the contrasting, simpler case.
+//
+// Like fedavg_secure_aggregation.hpp, this program does NOT reveal its
+// final result among the compute parties -- it exports each party's own
+// raw share of the summed product (and of the summed dataset size), and
+// reconstruction happens entirely at flo_server (see
+// server/secure_agg/reconstruct.py). The multiply step (Round 2 below)
+// STILL needs real inter-party communication -- that's inherent to secure
+// multiplication and unaffected by removing the final reveal.
 //
 // Currently PROTOCOL=5 (Trio) ONLY. This is a deliberate scope limit, not an
 // oversight: the native-fragment-input + prepare_mult composition this file
@@ -77,24 +85,29 @@
 //       1 x uint64                    -- this party's own replicated3pc
 //                                         share fragment (c_j) of this
 //                                         client's RAW dataset size
-//   output file:
+//   output file (this party's own raw Trio share of the result -- NOT
+//   revealed; see module docstring):
 //     uint32 elements_per_client
-//     elements_per_client x uint64  -- revealed sum-across-clients of
-//                                       weight_i*dataset_size_i, RAW
-//                                       (2*frac_bits fractional precision --
+//     elements_per_client x (p1, p2) uint64 pairs -- this party's own raw
+//                                       Trio share of sum-across-clients of
+//                                       weight_i*dataset_size_i. RAW/
+//                                       untruncated (2*frac_bits fractional
+//                                       precision once reconstructed --
 //                                       decode accordingly)
-//     1 x uint64                    -- revealed sum-across-clients of
-//                                       dataset_size_i (normal frac_bits --
-//                                       decode like the existing
+//     1 x (p1, p2) uint64 pair       -- this party's own raw Trio share of
+//                                       sum-across-clients of dataset_size_i
+//                                       (normal frac_bits once reconstructed
+//                                       -- decode like the existing
 //                                       DATASET_SIZE_LAYER_NAME field)
 //
 // Instantiated twice per protocol_executer.hpp's init/live convention (see
 // fedavg_secure_aggregation.hpp's docstring for the full explanation) --
 // both phases read the SAME num_clients/elements_per_client from the SAME
 // input file, so both execute identically-shaped loops issuing identical
-// counts of prepare_receive_from/prepare_mult/prepare_reveal_to_all calls,
-// which is what keeps the init phase's buffer-size bookkeeping consistent
-// with what the live phase actually sends -- no separate accounting needed.
+// counts of prepare_receive_from/prepare_mult calls (Rounds 1 and 2 below
+// still need real communication -- only the former final reveal round was
+// removed), which is what keeps the init phase's buffer-size bookkeeping
+// consistent with what the live phase actually sends.
 
 #include "../../datatypes/Additive_Share.hpp"
 #include <cstdint>
@@ -253,30 +266,27 @@ void MultFedAvgSecureAggregation(DATATYPE* res)
     for (uint32_t c = 1; c < num_clients; c++)
         total_dataset_size = total_dataset_size + ds_full[c];
 
-    // Round 3: reveal the summed product vector and the total dataset size.
-    for (uint32_t k = 0; k < elements_per_client; k++)
-        final_product[k].prepare_reveal_to_all();
-    total_dataset_size.prepare_reveal_to_all();
-    Share::communicate();
-
+    // No reveal -- export this party's own raw Trio share of the final
+    // summed product and summed dataset size directly. See module
+    // docstring: reconstruction now happens at flo_server, never among the
+    // compute parties. This needs no communicate() call at all (unlike the
+    // reveal round it replaces), since each party already locally holds
+    // its own share fields after Round 2's local per-client sum.
     if constexpr (std::is_same_v<Share, TRIO_LIVE_SHARE>)
     {
-        std::vector<uint64_t> output(elements_per_client);
-        for (uint32_t k = 0; k < elements_per_client; k++)
-            output[k] = static_cast<uint64_t>(final_product[k].complete_reveal_to_all());
-        uint64_t total_dataset_size_out = static_cast<uint64_t>(total_dataset_size.complete_reveal_to_all());
-
         std::ofstream out(output_path, std::ios::binary);
         out.write(reinterpret_cast<const char*>(&elements_per_client), sizeof(elements_per_client));
-        out.write(reinterpret_cast<const char*>(output.data()),
-                  static_cast<std::streamsize>(elements_per_client) * sizeof(uint64_t));
-        out.write(reinterpret_cast<const char*>(&total_dataset_size_out), sizeof(total_dataset_size_out));
-    }
-    else
-    {
         for (uint32_t k = 0; k < elements_per_client; k++)
-            final_product[k].complete_reveal_to_all();  // consume the matching receive; init-phase result is unused
-        total_dataset_size.complete_reveal_to_all();
+        {
+            uint64_t p1_out = static_cast<uint64_t>(final_product[k].get_share().raw_p1());
+            uint64_t p2_out = static_cast<uint64_t>(final_product[k].get_share().raw_p2());
+            out.write(reinterpret_cast<const char*>(&p1_out), sizeof(p1_out));
+            out.write(reinterpret_cast<const char*>(&p2_out), sizeof(p2_out));
+        }
+        uint64_t ds_p1_out = static_cast<uint64_t>(total_dataset_size.get_share().raw_p1());
+        uint64_t ds_p2_out = static_cast<uint64_t>(total_dataset_size.get_share().raw_p2());
+        out.write(reinterpret_cast<const char*>(&ds_p1_out), sizeof(ds_p1_out));
+        out.write(reinterpret_cast<const char*>(&ds_p2_out), sizeof(ds_p2_out));
     }
 
     *res = 0;

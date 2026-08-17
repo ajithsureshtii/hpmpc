@@ -17,6 +17,11 @@ class Replicated_Share
         this->a = a;
     }
 
+    // Flotilla addition -- see OECL0_Share's raw_p1()/raw_p2() docstring
+    // (protocols/3-PC/ours/oecl-P_0_template.hpp) for why this exists.
+    Datatype raw_x() const { return x; }
+    Datatype raw_a() const { return a; }
+
     template <typename func_add, typename func_sub>
     Replicated_Share share_SRNG(Datatype a, func_add ADD, func_sub SUB)
     {

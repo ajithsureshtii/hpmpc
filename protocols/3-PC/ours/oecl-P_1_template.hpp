@@ -11,6 +11,10 @@ class OECL1_Share
     OECL1_Share(Datatype p1, Datatype p2) : p1(p1), p2(p2) {}
     OECL1_Share(Datatype p1) : p1(p1) {}
 
+    // Flotilla addition -- see OECL0_Share's raw_p1()/raw_p2() docstring.
+    Datatype raw_p1() const { return p1; }
+    Datatype raw_p2() const { return p2; }
+
     static OECL1_Share public_val(Datatype a) { return OECL1_Share(a, SET_ALL_ZERO()); }
 
     OECL1_Share Not() const { return OECL1_Share(NOT(p1), p2); }

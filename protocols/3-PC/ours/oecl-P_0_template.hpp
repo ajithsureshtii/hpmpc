@@ -18,6 +18,14 @@ class OECL0_Share
     OECL0_Share(Datatype p1, Datatype p2) : p1(p1), p2(p2) {}
     OECL0_Share(Datatype p1) : p1(p1) {}
 
+    // Flotilla addition: exposes this party's own raw share fields so a
+    // program can export them (e.g. to reconstruct a value server-side
+    // instead of revealing it among the compute parties) without going
+    // through prepare_reveal_to_all/complete_reveal_to_all. Never used by
+    // hpmpc's own reveal path, which reads these fields internally.
+    Datatype raw_p1() const { return p1; }
+    Datatype raw_p2() const { return p2; }
+
     static OECL0_Share public_val(Datatype a) { return OECL0_Share(SET_ALL_ZERO(), SET_ALL_ZERO()); }
 
     OECL0_Share Not() const { return OECL0_Share(p1, p2); }
